@@ -1,12 +1,11 @@
 package dev.fullstackcode.currencyexchange;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
-import com.github.tomakehurst.wiremock.extension.responsetemplating.ResponseTemplateTransformer;
-import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import dev.fullstackcode.currencyexchange.junit.extension.TimingExtension;
+import dev.fullstackcode.currencyexchange.junit.extension.WiremockServerExtension;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,26 +13,16 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ExtendWith(TimingExtension.class)
-public class ProgrammaticWireMockTest  {
+@ExtendWith(WiremockServerExtension.class)
+public class ProgrammaticWireMockExtensionTest {
 
-
-	@RegisterExtension
-	static WireMockExtension currencyServer = WireMockExtension.newInstance()
-			.options(wireMockConfig().port(4141).extensions(new ResponseTemplateTransformer(true)))
-			.build();
-	@RegisterExtension
-	static WireMockExtension countryServer = WireMockExtension.newInstance()
-			.options(wireMockConfig().port(4040).extensions(new ResponseTemplateTransformer(true)))
-			.build();
 	@Autowired
 	private MockMvc mockMvc;
 
@@ -42,8 +31,10 @@ public class ProgrammaticWireMockTest  {
 	void contextLoads() {
 	}
 
+
 	@Test
-	public void testCurrencyConversionByCountry() throws Exception {
+	@ExtendWith(TimingExtension.class)
+	public void testCurrencyConversionByCountry(WireMockServer currencyServer,WireMockServer countryServer) throws Exception {
 
 		String url = String.format("%s/v3.1/name/%s", currencyServer.baseUrl(),"%s");
 	    System.out.println("url :" + url);
@@ -72,73 +63,13 @@ public class ProgrammaticWireMockTest  {
 				.andExpect(status().isOk());
 	}
 
-	@Test
-	public void testCurrencyConversionByCountryWhenNoCountryFoundWithGivenCode() throws Exception {
-		String currencyCode = "abc";
-		String currencyConversionUrl = String.format("/gh/fawazahmed0/currency-api@1/latest/currencies/usd/%s.json",currencyCode.toLowerCase());
 
-		String country = "japan";
-		String countryurl = String.format("/v3.1/name/%s",country.toLowerCase());
-
-		String countryResponse = """
-				{"status":404,"message":"Not Found"}""";
-		String CurrencyConversionResponse = """
-				{
-				    "date": "2023-05-19",
-				    "jpy": 138.544529
-				}""";
-
-
-		currencyServer.stubFor(WireMock.get(urlMatching(currencyConversionUrl)).willReturn(WireMock.aResponse().withStatus(200).withBody(CurrencyConversionResponse)));
-		countryServer.stubFor(WireMock.get(urlMatching(countryurl)).willReturn(WireMock.aResponse().withStatus(200).withBody(countryResponse)));
-
-
-		this.mockMvc.perform(get("/currencyCodeVersion/country/{countryCode}", country))
-				.andDo(res -> System.out.println(res.getResponse()))
-				.andExpect(status().isNotFound())
-		;
-
-
-	}
-
-
-	@Test
-	public void testConvertByCurrencyCode() throws Exception {
-		String currencyCode = "jpy";
-
-		String response = """
-				{
-				    "date": "2023-05-19",
-				    "jpy": 138.544529
-				}""";
-
-		String currencyConversionUrl = String.format("/gh/fawazahmed0/currency-api@1/latest/currencies/usd/%s.json",currencyCode.toLowerCase());
-
-		//stubFor(WireMock.get(urlEqualTo(currencyConversionUrl)).willReturn(WireMock.aResponse().withStatus(200).withJsonBody(response)));
-		currencyServer.stubFor(WireMock.get(urlEqualTo(currencyConversionUrl)).willReturn(WireMock.aResponse().withStatus(200).withBody(response)));
-
-		this.mockMvc.perform(get("/currencyCodeVersion/currencyCode/{currencyCode}", currencyCode))
-				.andExpect(status().isOk()).andExpect(content().string("{date=2023-05-19, jpy=138.544529}"));
-	}
-
-
-	@Test
-	public void testConvertByCurrencyCodeWhenConversionFoundWithGivenCurrencyCode() throws Exception {
-
-		String currencyCode = "abc";
-		String currencyConversionUrl = String.format("/gh/fawazahmed0/currency-api@1/latest/currencies/usd/%s.json", currencyCode.toLowerCase());
-
-		currencyServer.stubFor(WireMock.get(urlEqualTo(currencyConversionUrl)).willReturn(WireMock.aResponse().withStatus(403).withBody("Package size exceeded the configured limit of 50 MB")));
-
-		this.mockMvc.perform(get("/currencyCodeVersion/currencyCode/{currencyCode}", currencyCode))
-				.andExpect(status().isForbidden());
-
-
-	}
 
 	@DynamicPropertySource
 	public static void properties(DynamicPropertyRegistry registry) {
-		registry.add("country.url",()-> String.format("%s/v3.1/name/%s", countryServer.baseUrl(),"%s"));
-		registry.add("currencyconverter.url",()->String.format("%s/gh/fawazahmed0/currency-api@1/latest/currencies/usd/%s.json", currencyServer.baseUrl(),"%s"));
+		registry.add("country.url",()-> String.format("%s/v3.1/name/%s",
+				WiremockServerExtension.countryWireMock().baseUrl(),"%s"));
+		registry.add("currencyconverter.url",()->String.format("%s/gh/fawazahmed0/currency-api@1" +
+				"/latest/currencies/usd/%s.json", WiremockServerExtension.currencyWireMock().baseUrl(),"%s"));
 	}
 }
